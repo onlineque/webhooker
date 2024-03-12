@@ -19,3 +19,13 @@
 
 # Go workspace file
 go.work
+
+# jetbrains idea
+.idea/
+
+# certificates and privkeys
+*.crt
+*.key
+
+# binary itself
+webhooker
