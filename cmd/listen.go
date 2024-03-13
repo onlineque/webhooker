@@ -19,7 +19,9 @@ to quickly create a Cobra application.`,
 		certFile, _ := cmd.Flags().GetString("certfile")
 		keyFile, _ := cmd.Flags().GetString("keyfile")
 		listenAddress, _ := cmd.Flags().GetString("listen-address")
-		err := server.Listen(listenAddress, certFile, keyFile)
+		dbUri, _ := cmd.Flags().GetString("dburi")
+		mySrv := server.Server{}
+		err := mySrv.Listen(listenAddress, certFile, keyFile, dbUri)
 		if err != nil {
 			log.Fatalf("error starting the webhook server: %s", err)
 		}
@@ -31,6 +33,7 @@ func init() {
 	listenCmd.PersistentFlags().String("listen-address", ":8080", "listen address and port")
 	listenCmd.PersistentFlags().String("certfile", "", "certificate file")
 	listenCmd.PersistentFlags().String("keyfile", "", "private key file")
+	listenCmd.PersistentFlags().String("dburi", "", "MongoDB database connection URI")
 
 	// Here you will define your flags and configuration settings.
 

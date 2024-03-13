@@ -1,14 +1,17 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/go-playground/validator/v10"
+	"go.mongodb.org/mongo-driver/mongo"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+	"webhooker/database"
 )
 
 type WebhookerRequest struct {
@@ -17,13 +20,30 @@ type WebhookerRequest struct {
 	Message string `json:"message" validate:"required"`
 }
 
-func Listen(address string, certFile string, keyFile string) error {
-	http.HandleFunc("/webhook", handleWebhook)
+type Server struct {
+	DbObj    *database.DbConnection
+	Messages *mongo.Collection
+}
+
+type Message struct {
+	msg string
+}
+
+func (srv *Server) Listen(address string, certFile string, keyFile string, dbUri string) error {
+	srv.DbObj = &database.DbConnection{}
+	srv.DbObj.NewDbConnection(dbUri)
+	err := srv.DbObj.Connect()
+	if err != nil {
+		return err
+	}
+	srv.Messages = srv.DbObj.GetCollection("webhooker", "messages")
+
+	http.HandleFunc("/webhook", srv.handleWebhook)
 	log.Printf("webhook server listening on %s", address)
 	return http.ListenAndServeTLS(address, certFile, keyFile, nil)
 }
 
-func handleWebhook(w http.ResponseWriter, r *http.Request) {
+func (srv *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	ct := r.Header.Get("Content-Type")
 	mediaType := strings.ToLower(strings.TrimSpace(strings.Split(ct, ";")[0]))
 	if mediaType != "application/json" {
@@ -81,8 +101,16 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 		log.Print(err)
 		msg := fmt.Sprintf("failed to validate struct - %s", err)
 		http.Error(w, msg, http.StatusBadRequest)
+		return
 	}
 
-	log.Printf("webhook request: %+v", wr)
+	msg := Message{wr.Message}
+	insertResult, err := srv.Messages.InsertOne(context.TODO(), msg)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("token: %s, channel: %s, message: %s", wr.Token, wr.Channel, wr.Message)
+	log.Printf("inserted a single doc: %v", insertResult.InsertedID)
 	http.Error(w, "everything's all right", http.StatusOK)
 }
