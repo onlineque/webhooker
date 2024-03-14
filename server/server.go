@@ -45,10 +45,8 @@ func (srv *Server) Listen(address string, certFile string, keyFile string, dbUri
 	if err != nil {
 		return err
 	}
-	splitDbUri := strings.Split(dbUri, "/")
-	databaseName := splitDbUri[len(splitDbUri)-1]
-	srv.Messages = srv.DbObj.GetCollection(databaseName, "messages")
-	srv.Tokens = srv.DbObj.GetCollection(databaseName, "tokens")
+	srv.Messages = srv.DbObj.GetCollection("messages")
+	srv.Tokens = srv.DbObj.GetCollection("tokens")
 
 	http.HandleFunc("/webhook", srv.handleWebhook)
 	http.HandleFunc("/wall", srv.handleWall)
@@ -111,11 +109,12 @@ func (srv *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, msg, http.StatusBadRequest)
 
 		case errors.Is(err, io.ErrUnexpectedEOF):
-			msg := fmt.Sprintf("Request body contains badly-formed JSON")
+			msg := "Request body contains badly-formed JSON"
 			http.Error(w, msg, http.StatusBadRequest)
 
 		case errors.As(err, &unmarshalTypeError):
-			msg := fmt.Sprintf("Request body contains an invalid value for the %q field (at position %d)", unmarshalTypeError.Field, unmarshalTypeError.Offset)
+			msg := fmt.Sprintf("Request body contains an invalid value for the %q field (at position %d)",
+				unmarshalTypeError.Field, unmarshalTypeError.Offset)
 			http.Error(w, msg, http.StatusBadRequest)
 
 		case strings.HasPrefix(err.Error(), "json: unknown field "):
@@ -154,8 +153,8 @@ func (srv *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	insertResult, err := srv.Messages.InsertOne(context.TODO(), bson.D{
-		bson.E{"timestamp", time.Now()},
-		bson.E{"message", wr.Message},
+		bson.E{Key: "timestamp", Value: time.Now()},
+		bson.E{Key: "message", Value: wr.Message},
 	})
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -171,7 +170,7 @@ func (srv *Server) checkTokenValidity(token string) bool {
 	shaObj.Write([]byte(token))
 	userTokenHash := fmt.Sprintf("%x", shaObj.Sum(nil))
 	// search for the hashed token
-	filter := bson.D{{"token", userTokenHash}}
+	filter := bson.D{{Key: "token", Value: userTokenHash}}
 	tokenHash := &Token{}
 	err := srv.Tokens.FindOne(context.TODO(), filter).Decode(tokenHash)
 	if err != nil {
