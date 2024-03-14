@@ -27,7 +27,7 @@ curl -k -X POST -H 'Content-Type: application/json' -d '{"token":"<token>","chan
 
 To display already posted messages, visit:
 ```bash
-curl -khttps://<ip_address>:<port>/wall
+curl -k https://<ip_address>:<port>/wall
 ```
 
 ## Contributing
