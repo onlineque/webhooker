@@ -2,15 +2,18 @@ package server
 
 import (
 	"context"
+	"crypto/sha512"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/go-playground/validator/v10"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 	"webhooker/database"
 )
 
@@ -23,10 +26,16 @@ type WebhookerRequest struct {
 type Server struct {
 	DbObj    *database.DbConnection
 	Messages *mongo.Collection
+	Tokens   *mongo.Collection
 }
 
 type Message struct {
-	msg string
+	Message   string    `bson:"message"`
+	Timestamp time.Time `bson:"timestamp"`
+}
+
+type Token struct {
+	Token string `bson:"token"`
 }
 
 func (srv *Server) Listen(address string, certFile string, keyFile string, dbUri string) error {
@@ -36,11 +45,44 @@ func (srv *Server) Listen(address string, certFile string, keyFile string, dbUri
 	if err != nil {
 		return err
 	}
-	srv.Messages = srv.DbObj.GetCollection("webhooker", "messages")
+	splitDbUri := strings.Split(dbUri, "/")
+	databaseName := splitDbUri[len(splitDbUri)-1]
+	srv.Messages = srv.DbObj.GetCollection(databaseName, "messages")
+	srv.Tokens = srv.DbObj.GetCollection(databaseName, "tokens")
 
 	http.HandleFunc("/webhook", srv.handleWebhook)
+	http.HandleFunc("/wall", srv.handleWall)
 	log.Printf("webhook server listening on %s", address)
 	return http.ListenAndServeTLS(address, certFile, keyFile, nil)
+}
+
+func (srv *Server) handleWall(w http.ResponseWriter, _ *http.Request) {
+	cursor, err := srv.Messages.Find(context.TODO(), bson.D{})
+	if err != nil {
+		msg := fmt.Sprintf("error querying MongoDB database: %s", err)
+		http.Error(w, msg, http.StatusInternalServerError)
+		return
+	}
+
+	for cursor.Next(context.TODO()) {
+		// var elem Message
+		//var elem bson.M
+		var elem = &Message{}
+		err := cursor.Decode(&elem)
+		if err != nil {
+			msg := "cannot decode query result"
+			http.Error(w, msg, http.StatusInternalServerError)
+			return
+		}
+		_, err = w.Write([]byte(fmt.Sprintf("Time: %s\nMessage: %s\n\n", elem.Timestamp, elem.Message)))
+		if err != nil {
+			msg := fmt.Sprintf("error publishing the message: %s", err)
+			http.Error(w, msg, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	http.Error(w, "", http.StatusOK)
 }
 
 func (srv *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -104,13 +146,38 @@ func (srv *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg := Message{wr.Message}
-	insertResult, err := srv.Messages.InsertOne(context.TODO(), msg)
+	isTokenValid := srv.checkTokenValidity(wr.Token)
+	if !isTokenValid {
+		msg := "user token is invalid !"
+		http.Error(w, msg, http.StatusUnauthorized)
+		return
+	}
+
+	insertResult, err := srv.Messages.InsertOne(context.TODO(), bson.D{
+		bson.E{"timestamp", time.Now()},
+		bson.E{"message", wr.Message},
+	})
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	log.Printf("token: %s, channel: %s, message: %s", wr.Token, wr.Channel, wr.Message)
 	log.Printf("inserted a single doc: %v", insertResult.InsertedID)
-	http.Error(w, "everything's all right", http.StatusOK)
+	http.Error(w, "message created", http.StatusCreated)
+}
+
+func (srv *Server) checkTokenValidity(token string) bool {
+	shaObj := sha512.New()
+	shaObj.Write([]byte(token))
+	userTokenHash := fmt.Sprintf("%x", shaObj.Sum(nil))
+	// search for the hashed token
+	filter := bson.D{{"token", userTokenHash}}
+	tokenHash := &Token{}
+	err := srv.Tokens.FindOne(context.TODO(), filter).Decode(tokenHash)
+	if err != nil {
+		log.Printf("error decoding token: %s", err)
+		return false
+	}
+	log.Printf("token found in db")
+	return true
 }
