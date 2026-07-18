@@ -1,10 +1,10 @@
 module webhooker
 
-go 1.22.1
+go 1.25
 
 require (
 	github.com/go-playground/validator/v10 v10.19.0
-	github.com/sethvargo/go-password v0.2.0
+	github.com/sethvargo/go-password v0.4.0
 	github.com/spf13/cobra v1.8.0
 	go.mongodb.org/mongo-driver v1.14.0
 )
